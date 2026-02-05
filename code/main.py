@@ -55,10 +55,6 @@ def is_image_file(name: str) -> bool:
     ext = os.path.splitext(name.lower())[1]
     return ext in [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"]
 
-# ----------------------------
-# Robust scoring primitives
-# ----------------------------
-
 def gradient_mag(img: np.ndarray) -> np.ndarray:
     # gradient
     # gx
@@ -70,8 +66,7 @@ def gradient_mag(img: np.ndarray) -> np.ndarray:
     return np.sqrt(gx * gx + gy * gy)
 
 def center_crop(img: np.ndarray, crop_frac: float) -> np.ndarray:
-    # during experimentation, I wanted to focus more on the central part of the image
-    # and refrain from border distortion so implemented a center crop
+
     if crop_frac >= 1.0:
         return img
     H, W = img.shape
@@ -82,27 +77,19 @@ def center_crop(img: np.ndarray, crop_frac: float) -> np.ndarray:
     return img[y0:y0 + nh, x0:x0 + nw]
 
 def overlapping_views(ref: np.ndarray, mov: np.ndarray, dy: int, dx: int) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Return overlapping views for ref and mov when mov is shifted by (dy, dx).
-    No wrap-around. This is the key fix vs np.roll scoring.
-    """
     H, W = ref.shape
-
     # region in ref
     y0r = max(0, dy)
     y1r = min(H, H + dy)
     x0r = max(0, dx)
     x1r = min(W, W + dx)
-
     y0m = max(0, -dy)
     y1m = min(H, H - dy)
     x0m = max(0, -dx)
     x1m = min(W, W - dx)
-
     return ref[y0r:y1r, x0r:x1r], mov[y0m:y1m, x0m:x1m]
 
 def ncc_score(a: np.ndarray, b: np.ndarray) -> float:
-
     va = a.ravel()
     vb = b.ravel()
     va = va - va.mean()
@@ -117,13 +104,11 @@ def l2_score(a: np.ndarray, b: np.ndarray) -> float:
     d = (a - b).ravel()
     return float(np.dot(d, d))
 
-
 @dataclass(frozen=True)
 class AlignResult:
     dy: int
     dx: int
     score: float
-
 
 def exhaustive_align(
     ref: np.ndarray,
@@ -133,22 +118,15 @@ def exhaustive_align(
     crop_frac: float = 0.7,
     min_overlap: int = 80,
 ) -> AlignResult:
-    """
-    Exhaustive search over shifts in [-max_disp, max_disp]^2.
-    Uses gradient magnitude + overlap-only scoring (robust).
-    """
     # Preprocess for scoring
     ref_s = gradient_mag(center_crop(ref, crop_frac))
     mov_s = gradient_mag(center_crop(mov, crop_frac))
-
     best = AlignResult(0, 0, -1e18 if metric == "ncc" else 1e18)
-
     for dy in range(-max_disp, max_disp + 1):
         for dx in range(-max_disp, max_disp + 1):
             a, b = overlapping_views(ref_s, mov_s, dy, dx)
             if a.shape[0] < min_overlap or a.shape[1] < min_overlap:
                 continue
-
             if metric == "ncc":
                 s = ncc_score(a, b)
                 if s > best.score:
@@ -157,7 +135,6 @@ def exhaustive_align(
                 s = l2_score(a, b)
                 if s < best.score:
                     best = AlignResult(dy, dx, s)
-
     return best
 
 def downsample2(img: np.ndarray) -> np.ndarray:
@@ -178,9 +155,7 @@ def pyramid_align(
     min_size: int = 128,
     refine_radius: int = 6,
 ) -> AlignResult:
-
-    # pyramid align first recurses till the images are small
-    # then subsequently aligns the images and then scales back by 2
+    
     H, W = ref.shape
     if min(H, W) <= min_size:
         return exhaustive_align(ref, mov, max_disp=max_disp, metric=metric, crop_frac=crop_frac)
@@ -199,7 +174,6 @@ def pyramid_align(
 
     dy0, dx0 = 2 * coarse.dy, 2 * coarse.dx
 
-    # refine around dy0, dx0 at this scale
     ref_s = gradient_mag(center_crop(ref, crop_frac))
     mov_s = gradient_mag(center_crop(mov, crop_frac))
 
@@ -223,10 +197,7 @@ def pyramid_align(
     return best
 
 def apply_shift_noroll(img: np.ndarray, dy: int, dx: int) -> np.ndarray:
-    """
-    Apply shift without wrap-around by placing moved pixels into a blank canvas.
-    (For visualization, wrap-around looks ugly; this avoids that.)
-    """
+
     H, W = img.shape
     out = np.zeros_like(img)
 
